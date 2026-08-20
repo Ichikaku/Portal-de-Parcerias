@@ -3,6 +3,47 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta
+import requests
+
+@st.cache_data(ttl=3600)  # Guarda os dados em cache por 1 hora
+def carregar_dados_reais():
+    api_key = st.secrets.get("TRANSPARENCIA_API_KEY", None)
+    if not api_key:
+        st.warning("Chave de API não encontrada em st.secrets. Exibindo base vazia.")
+        return pd.DataFrame()
+
+    url = "https://api.portaldatransparencia.gov.br/api-de-dados/convenios"
+    headers = {"chave-api-dados": api_key}
+    params = {
+        "cnpjConvenente": "15424215000108", # CNPJ da UFMS
+        "pagina": 1
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        if response.status_code == 200:
+            dados = response.json()
+            registros = []
+            for item in dados:
+                registros.append({
+                    "id_termo": str(item.get("numero", "N/A")),
+                    "modalidade": item.get("tipoInstrumento", "Convênio"),
+                    "parceiro": item.get("concedente", {}).get("nome", "N/A"),
+                    "valor_global": float(item.get("valor", 0.0)),
+                    "status": item.get("situacao", "N/A"),
+                    "data_inicio": item.get("dataInicioVigencia", ""),
+                    "data_fim": item.get("dataFimVigencia", ""),
+                    "objeto": item.get("objeto", "Sem descrição"),
+                    "ano": int(item.get("dataInicioVigencia", "2024")[-4:]) if item.get("dataInicioVigencia") else 2024,
+                    "auditoria": "Verificado (API Federal)"
+                })
+            return pd.DataFrame(registros)
+        else:
+            st.error(f"Erro ao conectar com a API: {response.status_code}")
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Falha na requisição: {e}")
+        return pd.DataFrame()
 
 # 1. CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(
