@@ -15,32 +15,31 @@ st.set_page_config(
 
 # 2. FUNÇÃO PARA CARREGAR DADOS REAIS DA API FEDERAL
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def carregar_dados_reais():
     api_key = st.secrets.get("TRANSPARENCIA_API_KEY", None)
     if not api_key:
+        st.warning("Variável TRANSPARENCIA_API_KEY não encontrada no st.secrets.")
         return pd.DataFrame()
+
+    # Remove espaços ou quebras de linha acidentais
+    api_key = api_key.strip()
 
     url = "https://api.portaldatransparencia.gov.br/api-de-dados/convenios"
     headers = {"chave-api-dados": api_key}
-    
-    # Exemplo requisitando a primeira página de convênios da UFMS
-    params = {
-        "cnpjConvenente": "15424215000108",  # CNPJ da UFMS
-        "pagina": 1
-    }
+    params = {"cnpjConvenente": "15424215000108", "pagina": 1}
 
     try:
         response = requests.get(url, headers=headers, params=params, timeout=10)
         if response.status_code == 200:
             dados = response.json()
             if not dados:
+                st.info("API respondeu com sucesso, mas não retornou registros para essa consulta.")
                 return pd.DataFrame()
 
             registros = []
             for item in dados:
                 data_ini = item.get("dataInicioVigencia", "")
-                
-                # Extrai o ano da data (formato padrão DD/MM/YYYY na API)
                 try:
                     ano = int(data_ini.split("/")[-1]) if data_ini else datetime.now().year
                 except ValueError:
@@ -60,8 +59,10 @@ def carregar_dados_reais():
                 })
             return pd.DataFrame(registros)
         else:
+            st.error(f"Erro na API Federal (Código {response.status_code}): {response.text}")
             return pd.DataFrame()
-    except Exception:
+    except Exception as e:
+        st.error(f"Exceção durante a requisição: {e}")
         return pd.DataFrame()
 
 # 3. FUNÇÃO PARA GERAR DADOS SIMULADOS (MOCK)
