@@ -15,20 +15,14 @@ st.set_page_config(
 
 # 2. FUNÇÃO PARA CARREGAR DADOS REAIS DA API FEDERAL
 @st.cache_data(ttl=3600)
-@st.cache_data(ttl=3600)
 def carregar_dados_reais():
     api_key = st.secrets.get("TRANSPARENCIA_API_KEY", None)
     if not api_key:
-        st.warning("Variável TRANSPARENCIA_API_KEY não encontrada no st.secrets.")
         return pd.DataFrame()
 
-    # Remove espaços ou quebras de linha acidentais
     api_key = api_key.strip()
-
     url = "https://api.portaldatransparencia.gov.br/api-de-dados/convenios"
     headers = {"chave-api-dados": api_key}
-
-# Parâmetros com nomes corretos aceitos pela API
     params = {"codigoOrgao": "26258", "pagina": 1}
 
     try:
@@ -36,26 +30,35 @@ def carregar_dados_reais():
         if response.status_code == 200:
             dados = response.json()
             if not dados:
-                st.info("API respondeu com sucesso, mas não retornou registros para essa consulta.")
                 return pd.DataFrame()
+
+            # Extrai texto simples de objetos/dicionários da API
+            def extrair_texto(val, padrao="Não informado"):
+                if isinstance(val, dict):
+                    return val.get("descricao") or val.get("nome") or padrao
+                return str(val) if val is not None else padrao
 
             registros = []
             for item in dados:
-                data_ini = item.get("dataInicioVigencia", "")
+                modalidade_txt = extrair_texto(item.get("tipoInstrumento"), "Convênio")
+                parceiro_txt = extrair_texto(item.get("concedente"), "Não informado")
+                status_txt = extrair_texto(item.get("situacao"), "N/A").upper()
+                
+                data_ini = str(item.get("dataInicioVigencia") or "")
                 try:
-                    ano = int(data_ini.split("/")[-1]) if data_ini else datetime.now().year
-                except ValueError:
+                    ano = int(data_ini.split("/")[-1]) if "/" in data_ini else datetime.now().year
+                except (ValueError, IndexError):
                     ano = datetime.now().year
 
                 registros.append({
                     "id_termo": str(item.get("numero", "N/A")),
-                    "modalidade": item.get("tipoInstrumento", "Convênio"),
-                    "parceiro": item.get("concedente", {}).get("nome", "Não informado"),
-                    "valor_global": float(item.get("valor", 0.0)),
-                    "status": str(item.get("situacao", "N/A")).upper(),
+                    "modalidade": modalidade_txt,
+                    "parceiro": parceiro_txt,
+                    "valor_global": float(item.get("valor") or 0.0),
+                    "status": status_txt,
                     "data_inicio": data_ini,
-                    "data_fim": item.get("dataFimVigencia", ""),
-                    "objeto": item.get("objeto", "Sem descrição disponível"),
+                    "data_fim": str(item.get("dataFimVigencia") or ""),
+                    "objeto": str(item.get("objeto") or "Sem descrição disponível"),
                     "ano": ano,
                     "auditoria": "Verificado (API Federal)"
                 })
@@ -66,6 +69,7 @@ def carregar_dados_reais():
     except Exception as e:
         st.error(f"Exceção durante a requisição: {e}")
         return pd.DataFrame()
+
 
 # 3. FUNÇÃO PARA GERAR DADOS SIMULADOS (MOCK)
 @st.cache_data
