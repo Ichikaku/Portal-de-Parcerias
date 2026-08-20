@@ -120,10 +120,18 @@ st.sidebar.title("Filtros do Painel")
 min_ano = int(df_raw['ano'].min())
 max_ano = int(df_raw['ano'].max())
 
+# Trava de segurança: impede erro do Streamlit se todos os dados forem de um único ano
+if min_ano == max_ano:
+    slider_min = min_ano - 1
+    slider_max = max_ano
+else:
+    slider_min = min_ano
+    slider_max = max_ano
+
 ano_selecionado = st.sidebar.slider(
     "Intervalo de Anos", 
-    min_value=min_ano, 
-    max_value=max_ano, 
+    min_value=slider_min, 
+    max_value=slider_max, 
     value=(min_ano, max_ano)
 )
 
@@ -153,7 +161,6 @@ df_filtrado = df_raw[
     (df_raw['status'].isin(status_filtro)) &
     (df_raw['auditoria'].isin(auditoria_filtro))
 ]
-
 # 6. CABEÇALHO PRINCIPAL
 st.title("📊 Observatório Independente de Parcerias — UFMS")
 st.caption("Painel acadêmico de transparência passiva via cruzamento de Dados Abertos e DOU.")
