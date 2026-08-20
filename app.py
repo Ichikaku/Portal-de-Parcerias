@@ -5,47 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import requests
 
-@st.cache_data(ttl=3600)  # Guarda os dados em cache por 1 hora
-def carregar_dados_reais():
-    api_key = st.secrets.get("TRANSPARENCIA_API_KEY", None)
-    if not api_key:
-        st.warning("Chave de API não encontrada em st.secrets. Exibindo base vazia.")
-        return pd.DataFrame()
-
-    url = "https://api.portaldatransparencia.gov.br/api-de-dados/convenios"
-    headers = {"chave-api-dados": api_key}
-    params = {
-        "cnpjConvenente": "15424215000108", # CNPJ da UFMS
-        "pagina": 1
-    }
-
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=10)
-        if response.status_code == 200:
-            dados = response.json()
-            registros = []
-            for item in dados:
-                registros.append({
-                    "id_termo": str(item.get("numero", "N/A")),
-                    "modalidade": item.get("tipoInstrumento", "Convênio"),
-                    "parceiro": item.get("concedente", {}).get("nome", "N/A"),
-                    "valor_global": float(item.get("valor", 0.0)),
-                    "status": item.get("situacao", "N/A"),
-                    "data_inicio": item.get("dataInicioVigencia", ""),
-                    "data_fim": item.get("dataFimVigencia", ""),
-                    "objeto": item.get("objeto", "Sem descrição"),
-                    "ano": int(item.get("dataInicioVigencia", "2024")[-4:]) if item.get("dataInicioVigencia") else 2024,
-                    "auditoria": "Verificado (API Federal)"
-                })
-            return pd.DataFrame(registros)
-        else:
-            st.error(f"Erro ao conectar com a API: {response.status_code}")
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Falha na requisição: {e}")
-        return pd.DataFrame()
-
-# 1. CONFIGURAÇÃO DA PÁGINA
+# 1. CONFIGURAÇÃO DA PÁGINA (Deve ser o primeiro comando Streamlit)
 st.set_page_config(
     page_title="Observatório de Parcerias UFMS",
     page_icon="📊",
@@ -53,7 +13,58 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. GERAÇÃO DE DADOS SIMULADOS (MOCK)
+# 2. FUNÇÃO PARA CARREGAR DADOS REAIS DA API FEDERAL
+@st.cache_data(ttl=3600)
+def carregar_dados_reais():
+    api_key = st.secrets.get("TRANSPARENCIA_API_KEY", None)
+    if not api_key:
+        return pd.DataFrame()
+
+    url = "https://api.portaldatransparencia.gov.br/api-de-dados/convenios"
+    headers = {"chave-api-dados": api_key}
+    
+    # Exemplo requisitando a primeira página de convênios da UFMS
+    params = {
+        "cnpjConvenente": "15424215000108",  # CNPJ da UFMS
+        "pagina": 1
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        if response.status_code == 200:
+            dados = response.json()
+            if not dados:
+                return pd.DataFrame()
+
+            registros = []
+            for item in dados:
+                data_ini = item.get("dataInicioVigencia", "")
+                
+                # Extrai o ano da data (formato padrão DD/MM/YYYY na API)
+                try:
+                    ano = int(data_ini.split("/")[-1]) if data_ini else datetime.now().year
+                except ValueError:
+                    ano = datetime.now().year
+
+                registros.append({
+                    "id_termo": str(item.get("numero", "N/A")),
+                    "modalidade": item.get("tipoInstrumento", "Convênio"),
+                    "parceiro": item.get("concedente", {}).get("nome", "Não informado"),
+                    "valor_global": float(item.get("valor", 0.0)),
+                    "status": str(item.get("situacao", "N/A")).upper(),
+                    "data_inicio": data_ini,
+                    "data_fim": item.get("dataFimVigencia", ""),
+                    "objeto": item.get("objeto", "Sem descrição disponível"),
+                    "ano": ano,
+                    "auditoria": "Verificado (API Federal)"
+                })
+            return pd.DataFrame(registros)
+        else:
+            return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+# 3. FUNÇÃO PARA GERAR DADOS SIMULADOS (MOCK)
 @st.cache_data
 def gerar_dados_simulados(n=120):
     np.random.seed(42)
@@ -81,28 +92,36 @@ def gerar_dados_simulados(n=120):
             "objeto": f"Projeto de P&D/Extensão de Teste nº {i} focado em inovação regional.",
             "parceiro": np.random.choice(parceiros),
             "valor_global": round(valor, 2),
-            "data_inicio": data_ini.strftime("%Y-%m-%d"),
-            "data_fim": data_fim.strftime("%Y-%m-%d"),
+            "data_inicio": data_ini.strftime("%d/%m/%Y"),
+            "data_fim": data_fim.strftime("%d/%m/%Y"),
             "status": status,
-            "ano": ano,
-            "auditoria": np.random.choice(auditoria_status, p=[0.75, 0.15, 0.10]),
-            "link_sei": "https://sei.ufms.br",
-            "link_dou": "https://in.gov.br"
+            "ano": int(ano),
+            "auditoria": np.random.choice(auditoria_status, p=[0.75, 0.15, 0.10])
         })
         
     return pd.DataFrame(dados)
 
-df_raw = gerar_dados_simulados()
+# 4. ORQUESTRAÇÃO DA CARGA DE DADOS
+df_raw = carregar_dados_reais()
 
-# 3. BARRA LATERAL (FILTROS)
+if df_raw.empty:
+    st.info("ℹ️ **Modo de Demonstração (Dados Fictícios)**: Para carregar dados reais, cadastre a chave `TRANSPARENCIA_API_KEY` em **Settings > Secrets** no Streamlit Cloud.")
+    df_raw = gerar_dados_simulados()
+else:
+    st.success("✅ **Conexão Estabelecida**: Dados reais carregados diretamente da API do Portal da Transparência!")
+
+# 5. BARRA LATERAL (FILTROS)
 st.sidebar.image("https://www.ufms.br/wp-content/uploads/2022/09/UFMS_POS-1.png", width=180)
 st.sidebar.title("Filtros do Painel")
 
+min_ano = int(df_raw['ano'].min())
+max_ano = int(df_raw['ano'].max())
+
 ano_selecionado = st.sidebar.slider(
     "Intervalo de Anos", 
-    min_value=int(df_raw['ano'].min()), 
-    max_value=int(df_raw['ano'].max()), 
-    value=(2022, 2026)
+    min_value=min_ano, 
+    max_value=max_ano, 
+    value=(min_ano, max_ano)
 )
 
 modalidade_filtro = st.sidebar.multiselect(
@@ -132,18 +151,19 @@ df_filtrado = df_raw[
     (df_raw['auditoria'].isin(auditoria_filtro))
 ]
 
-# 4. CABEÇALHO PRINCIPAL
+# 6. CABEÇALHO PRINCIPAL
 st.title("📊 Observatório Independente de Parcerias — UFMS")
 st.caption("Painel acadêmico de transparência passiva via cruzamento de Dados Abertos e DOU.")
 st.markdown("---")
 
-# 5. CARTÕES DE MÉTRICAS (KPIs)
+# 7. CARTÕES DE MÉTRICAS (KPIs)
 col1, col2, col3, col4 = st.columns(4)
 
 total_recursos = df_filtrado['valor_global'].sum()
 total_acordos = len(df_filtrado)
 acordos_vigentes = len(df_filtrado[df_filtrado['status'] == 'VIGENTE'])
-taxa_consistencia = (len(df_filtrado[df_filtrado['auditoria'] == 'Consistente (API + DOU)']) / total_acordos * 100) if total_acordos > 0 else 0
+qtd_auditados = len(df_filtrado[df_filtrado['auditoria'].str.contains("Verificado|Consistente", case=False, na=False)])
+taxa_consistencia = (qtd_auditados / total_acordos * 100) if total_acordos > 0 else 0
 
 col1.metric("Montante Captado", f"R$ {total_recursos:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 col2.metric("Total de Instrumentos", total_acordos)
@@ -152,65 +172,62 @@ col4.metric("Consistência dos Dados", f"{taxa_consistencia:.1f}%")
 
 st.markdown("---")
 
-# 6. VISUALIZAÇÕES GRÁFICAS
+# 8. VISUALIZAÇÕES GRÁFICAS E TABELA
 tab_graficos, tab_tabela = st.tabs(["📈 Análises Gráficas", "📋 Tabela Detalhada & Auditoria"])
 
 with tab_graficos:
-    g_col1, g_col2 = st.columns(2)
-    
-    with g_col1:
-        # Gráfico de Evolução Anual por Modalidade
-        df_ano_mod = df_filtrado.groupby(['ano', 'modalidade'])['valor_global'].sum().reset_index()
-        fig_evolucao = px.bar(
-            df_ano_mod, 
-            x='ano', 
-            y='valor_global', 
-            color='modalidade', 
-            title="Evolução Anual de Recursos por Modalidade (R$)",
-            labels={'valor_global': 'Valor (R$)', 'ano': 'Ano'},
-            barmode='stack'
+    if not df_filtrado.empty:
+        g_col1, g_col2 = st.columns(2)
+        
+        with g_col1:
+            df_ano_mod = df_filtrado.groupby(['ano', 'modalidade'])['valor_global'].sum().reset_index()
+            fig_evolucao = px.bar(
+                df_ano_mod, 
+                x='ano', 
+                y='valor_global', 
+                color='modalidade', 
+                title="Evolução Anual de Recursos por Modalidade (R$)",
+                labels={'valor_global': 'Valor (R$)', 'ano': 'Ano'},
+                barmode='stack'
+            )
+            st.plotly_chart(fig_evolucao, use_container_width=True)
+
+        with g_col2:
+            fig_auditoria = px.pie(
+                df_filtrado, 
+                names='auditoria', 
+                title="Distribuição do Status de Validação Cruzada",
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set2
+            )
+            st.plotly_chart(fig_auditoria, use_container_width=True)
+
+        df_parceiros = df_filtrado.groupby('parceiro')['valor_global'].sum().reset_index().sort_values(by='valor_global', ascending=True)
+        fig_parceiros = px.bar(
+            df_parceiros, 
+            x='valor_global', 
+            y='parceiro', 
+            orientation='h', 
+            title="Volume Financeiro por Ente Parceiro / Financiador",
+            labels={'valor_global': 'Total Acumulado (R$)', 'parceiro': 'Parceiro'}
         )
-        st.plotly_chart(fig_evolucao, use_container_width=True)
+        st.plotly_chart(fig_parceiros, use_container_width=True)
+    else:
+        st.warning("Nenhum dado encontrado para os filtros selecionados.")
 
-    with g_col2:
-        # Gráfico de Rosca para Auditoria
-        fig_auditoria = px.pie(
-            df_filtrado, 
-            names='auditoria', 
-            title="Distribuição do Status de Validação Cruzada",
-            hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Set2
-        )
-        st.plotly_chart(fig_auditoria, use_container_width=True)
-
-    # Gráfico de Maiores Parceiros
-    df_parceiros = df_filtrado.groupby('parceiro')['valor_global'].sum().reset_index().sort_values(by='valor_global', ascending=True)
-    fig_parceiros = px.bar(
-        df_parceiros, 
-        x='valor_global', 
-        y='parceiro', 
-        orientation='h', 
-        title="Volume Financeiro por Ente Parceiro / Financiador",
-        labels={'valor_global': 'Total Acumulado (R$)', 'parceiro': 'Parceiro'}
-    )
-    st.plotly_chart(fig_parceiros, use_container_width=True)
-
-# 7. TABELA INTERATIVA DE DADOS
 with tab_tabela:
     st.subheader("Base Cruzada de Instrumentos Celebrações")
     
-    # Campo de busca rápida na tabela
     termo_busca = st.text_input("🔍 Buscar por objeto, parceiro ou número do termo:")
     
     df_exibicao = df_filtrado.copy()
-    if termo_busca:
+    if termo_busca and not df_exibicao.empty:
         df_exibicao = df_exibicao[
-            df_exibicao['objeto'].str.contains(termo_busca, case=False) |
-            df_exibicao['parceiro'].str.contains(termo_busca, case=False) |
-            df_exibicao['id_termo'].str.contains(termo_busca, case=False)
+            df_exibicao['objeto'].str.contains(termo_busca, case=False, na=False) |
+            df_exibicao['parceiro'].str.contains(termo_busca, case=False, na=False) |
+            df_exibicao['id_termo'].str.contains(termo_busca, case=False, na=False)
         ]
     
-    # Renderização da tabela formatada
     st.dataframe(
         df_exibicao[[
             "id_termo", "modalidade", "parceiro", "valor_global", 
@@ -231,7 +248,6 @@ with tab_tabela:
         use_container_width=True
     )
 
-    # Botão de Exportação
     csv_data = df_exibicao.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="📥 Baixar Dados Filtrados em CSV",
