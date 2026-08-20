@@ -27,7 +27,7 @@ def carregar_dados_reais():
 
     url = "https://api.portaldatransparencia.gov.br/api-de-dados/convenios"
     headers = {"chave-api-dados": api_key}
-    params = {"cnpjConvenente": "15424215000108", "pagina": 1}
+    params = {"ufConvenente": "MS","pagina": 1}
 
     try:
         response = requests.get(url, headers=headers, params=params, timeout=10)
